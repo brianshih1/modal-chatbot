@@ -2,8 +2,27 @@ import modal
 import time
 import os
 import re
+import pathlib
+
+from app import load_docs, index_documents, chat
 
 stub = modal.Stub("git-repo", 
+    image=modal.Image.debian_slim()
+        .apt_install("git")
+        .env({"GIT_PYTHON_REFRESH": "quiet"})
+        .pip_install(
+            "streamlit",
+            "langchain",
+            "langchain_openai",
+            "GitPython",
+            "faiss-cpu~=1.7.3",
+            "sentence_transformers",
+            "pinecone-client"
+        )
+        .pip_install("git+https://github.com/modal-labs/asgiproxy.git")
+)
+
+test_stub = modal.Stub("git-repo", 
     image=modal.Image.debian_slim()
         .apt_install("git")
         .env({"GIT_PYTHON_REFRESH": "quiet"})
@@ -12,81 +31,103 @@ stub = modal.Stub("git-repo",
             "langchain_openai",
             "GitPython",
             "faiss-cpu~=1.7.3",
-            "sentence_transformers"
+            "sentence_transformers",
+            "pinecone-client"
         )
 )
 
-def file_filter(path: str):
-    # TODO: regex
-    return path.endswith(".md") or path.endswith(".py") or path.endswith(".txt")
+streamlit_script_local_path = pathlib.Path(__file__).parent / "app.py"
+streamlit_script_remote_path = pathlib.Path("/root/app.py")
 
-def markdown_filter(path: str):
-    rule = re.compile(r".+\.md")
-    return bool(rule.match(path))
-
-def python_filter(path: str):
-    rule = re.compile(r"^\./code/modal/cli/.*\.py$")
-    return bool(rule.match(path))
-
-def txt_filter(path: str):
-    rule = re.compile(r".+\.txt")
-    return bool(rule.match(path))
-
-@stub.function()
-def load_docs(path):
-    from langchain_community.document_loaders import GitLoader
-    from langchain.text_splitter import PythonCodeTextSplitter
-    py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/modal-labs/modal-client.git", file_filter=python_filter)
-    # py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/gitpython-developers/QuickStartTutorialFiles.git", file_filter=python_filter)
-    py_docs = py_loader.load()
-    
-    paths = list(map(lambda x: x.metadata["file_path"], py_docs))
-    print(f"Paths: {paths}")
-
-    split_py_docs = PythonCodeTextSplitter().split_documents(py_docs)
-    
-    print(f"Docs Count: {len(py_docs)}")
-
-    print(f"Split Docs Count: {len(split_py_docs)}")
-    print("Hello")
-    return split_py_docs
-    
-
-# TODO: Can we use volume to not have to reindex every time?
-@stub.function(secrets=[modal.Secret.from_name("openai-secret")])
-def index_documents(docs):
-    from langchain.vectorstores.faiss import FAISS
-    from langchain_community.embeddings import HuggingFaceEmbeddings
-
-    print("Indexing documents")
-    embeddings = HuggingFaceEmbeddings()
-    
-    vectorstore = FAISS.from_documents(docs, embeddings)
-    print("Created vector store")
-    vectorstore.add_documents(docs)
-    print("Added documentsss")
-    chat.local(vectorstore)
-    return vectorstore
-    
-@stub.function(secrets=[modal.Secret.from_name("openai-secret")])
-def chat(vectorstore):
-    from langchain_openai import ChatOpenAI
-    from langchain.chains import ConversationalRetrievalChain
-
-    print("Start chat")
-    chat_model = ChatOpenAI(model_name="gpt-3.5-turbo", api_key=os.environ["OPENAI_API_KEY"])
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=chat_model,
-        retriever=vectorstore.as_retriever(),
+if not streamlit_script_local_path.exists():
+    raise RuntimeError(
+        "app.py not found! Place the script with your streamlit app in the same directory."
     )
 
-    result = chain({"question": "What is Modal stub?", "chat_history": []})
+streamlit_script_mount = modal.Mount.from_local_file(
+    streamlit_script_local_path,
+    streamlit_script_remote_path,
+)
 
-    print(f"Result: {result}")
 
-@stub.local_entrypoint()
-def main():
-    docs = load_docs.remote("/code")
-    vectorstore = index_documents.remote(docs)
-    # chat.remote(vectorstore)
-    time.sleep(10)
+HOST = "127.0.0.1"
+PORT = "8000"
+
+
+def spawn_server():
+    import socket
+    import subprocess
+
+    process = subprocess.Popen(
+        [
+            "streamlit",
+            "run",
+            str(streamlit_script_remote_path),
+            "--browser.serverAddress",
+            HOST,
+            "--server.port",
+            PORT,
+            "--browser.serverPort",
+            PORT,
+            "--server.enableCORS",
+            "false",
+        ]
+    )
+
+    # Poll until webserver accepts connections before running inputs.
+    while True:
+        try:
+            socket.create_connection((HOST, int(PORT)), timeout=1).close()
+            print("Webserver ready!")
+            return process
+        except (socket.timeout, ConnectionRefusedError):
+            # Check if launcher webserving process has exited.
+            # If so, a connection can never be made.
+            retcode = process.poll()
+            if retcode is not None:
+                raise RuntimeError(
+                    f"launcher exited unexpectedly with code {retcode}"
+                )
+
+@stub.function(
+    # Allows 100 concurrent requests per container.
+    allow_concurrent_inputs=100,
+    mounts=[streamlit_script_mount],
+    secrets=[
+        modal.Secret.from_name("openai-secret"),
+        modal.Secret.from_name("pinecone-key")
+    ]
+)
+@modal.asgi_app()
+def run():
+    from asgiproxy.config import BaseURLProxyConfigMixin, ProxyConfig
+    from asgiproxy.context import ProxyContext
+    from asgiproxy.simple_proxy import make_simple_proxy_app
+
+    spawn_server()
+
+    config = type(
+        "Config",
+        (BaseURLProxyConfigMixin, ProxyConfig),
+        {
+            "upstream_base_url": f"http://{HOST}:{PORT}",
+            "rewrite_host_header": f"{HOST}:{PORT}",
+        },
+    )()
+    proxy_context = ProxyContext(config)
+    return make_simple_proxy_app(proxy_context)
+
+
+@test_stub.function(
+    # Allows 100 concurrent requests per container.
+    allow_concurrent_inputs=100,
+    mounts=[streamlit_script_mount],
+    secrets=[
+        modal.Secret.from_name("openai-secret"),
+        modal.Secret.from_name("pinecone-key")
+    ]
+)
+def index():
+    docs = load_docs()
+    vector_store = index_documents(docs)
+    chat(vector_store)
