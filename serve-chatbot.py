@@ -14,7 +14,6 @@ stub = modal.Stub("git-repo",
             "faiss-cpu~=1.7.3",
             "sentence_transformers"
         )
-
 )
 
 def file_filter(path: str):
@@ -34,37 +33,67 @@ def txt_filter(path: str):
     return bool(rule.match(path))
 
 @stub.function()
-def load_files(path):
+def load_docs(path):
     from langchain_community.document_loaders import GitLoader
     from langchain.text_splitter import PythonCodeTextSplitter
-    py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/modal-labs/modal-client.git", file_filter=python_filter)
+    # py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/modal-labs/modal-client.git", file_filter=python_filter)
+    py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/gitpython-developers/QuickStartTutorialFiles.git", file_filter=python_filter)
     py_docs = py_loader.load()
     
     split_py_docs = PythonCodeTextSplitter().split_documents(py_docs)
     print(f"Docs Count: {len(py_docs)}")
     print(f"Split Docs Count: {len(split_py_docs)}")
     print("Hello")
-    index_documents.remote(split_py_docs)
+    return split_py_docs
     
 
 # TODO: Can we use volume to not have to reindex every time?
-@stub.function(secrets=[modal.Secret.from_name("my-openai-secret")])
+@stub.function(secrets=[modal.Secret.from_name("openai-secret")])
 def index_documents(docs):
     from langchain.vectorstores.faiss import FAISS
     from langchain_community.embeddings import HuggingFaceEmbeddings
     from langchain_openai import OpenAIEmbeddings
 
-    # embeddings = OpenAIEmbeddings(api_key=os.environ["open_api_key"])
+    print("INDEXXXX DOCUMETNS")
+    # embeddings = OpenAIEmbeddings(api_key=o
+    # s.environ["open_api_key"])
     embeddings = HuggingFaceEmbeddings()
     
     vectorstore = FAISS.from_documents(docs, embeddings)
+    print("Created vector store")
     vectorstore.add_documents(docs)
+    print("Added documentsss")
+
     # vectorstore.
     # print(f"Results: {results}")
+    chat.local(vectorstore)
+    return vectorstore
+    
+@stub.function(secrets=[modal.Secret.from_name("openai-secret")])
+def chat(vectorstore):
+    from langchain_openai import ChatOpenAI
+    from langchain.chains import ConversationalRetrievalChain
+    from langchain import vectorstores
+    from langchain_core.prompts import PromptTemplate
 
+    print("Start chat")
+    chat_model = ChatOpenAI(model_name="gpt-3.5-turbo", api_key=os.environ["OPENAI_API_KEY"])
+    chain = ConversationalRetrievalChain.from_llm(
+        llm=chat_model,
+        retriever=vectorstore.as_retriever(),
+    )
+
+    result = chain({"question": "What is Modal stub?", "chat_history": []})
+
+    print(f"Result: {result}")
+    # chain = ConversationalRetrievalChain(
+    # combine_docs_chain=combine_docs_chain,
+    # retriever=vector,
+    # question_generator=question_generator_chain,
 
 @stub.local_entrypoint()
 def main():
-    load_files.remote("/code")
-    print("foo")
-    time.sleep(599)
+    docs = load_docs.remote("/code")
+    vectorstore = index_documents.remote(docs)
+    # chat.remote(vectorstore)
+    time.sleep(10)
