@@ -25,7 +25,7 @@ def markdown_filter(path: str):
     return bool(rule.match(path))
 
 def python_filter(path: str):
-    rule = re.compile(r".+\.py")
+    rule = re.compile(r"^\./code/modal/cli/.*\.py$")
     return bool(rule.match(path))
 
 def txt_filter(path: str):
@@ -36,12 +36,17 @@ def txt_filter(path: str):
 def load_docs(path):
     from langchain_community.document_loaders import GitLoader
     from langchain.text_splitter import PythonCodeTextSplitter
-    # py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/modal-labs/modal-client.git", file_filter=python_filter)
-    py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/gitpython-developers/QuickStartTutorialFiles.git", file_filter=python_filter)
+    py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/modal-labs/modal-client.git", file_filter=python_filter)
+    # py_loader = GitLoader(repo_path="./code", clone_url="https://github.com/gitpython-developers/QuickStartTutorialFiles.git", file_filter=python_filter)
     py_docs = py_loader.load()
     
+    paths = list(map(lambda x: x.metadata["file_path"], py_docs))
+    print(f"Paths: {paths}")
+
     split_py_docs = PythonCodeTextSplitter().split_documents(py_docs)
+    
     print(f"Docs Count: {len(py_docs)}")
+
     print(f"Split Docs Count: {len(split_py_docs)}")
     print("Hello")
     return split_py_docs
@@ -52,20 +57,14 @@ def load_docs(path):
 def index_documents(docs):
     from langchain.vectorstores.faiss import FAISS
     from langchain_community.embeddings import HuggingFaceEmbeddings
-    from langchain_openai import OpenAIEmbeddings
 
-    print("INDEXXXX DOCUMETNS")
-    # embeddings = OpenAIEmbeddings(api_key=o
-    # s.environ["open_api_key"])
+    print("Indexing documents")
     embeddings = HuggingFaceEmbeddings()
     
     vectorstore = FAISS.from_documents(docs, embeddings)
     print("Created vector store")
     vectorstore.add_documents(docs)
     print("Added documentsss")
-
-    # vectorstore.
-    # print(f"Results: {results}")
     chat.local(vectorstore)
     return vectorstore
     
@@ -73,8 +72,6 @@ def index_documents(docs):
 def chat(vectorstore):
     from langchain_openai import ChatOpenAI
     from langchain.chains import ConversationalRetrievalChain
-    from langchain import vectorstores
-    from langchain_core.prompts import PromptTemplate
 
     print("Start chat")
     chat_model = ChatOpenAI(model_name="gpt-3.5-turbo", api_key=os.environ["OPENAI_API_KEY"])
@@ -86,10 +83,6 @@ def chat(vectorstore):
     result = chain({"question": "What is Modal stub?", "chat_history": []})
 
     print(f"Result: {result}")
-    # chain = ConversationalRetrievalChain(
-    # combine_docs_chain=combine_docs_chain,
-    # retriever=vector,
-    # question_generator=question_generator_chain,
 
 @stub.local_entrypoint()
 def main():
