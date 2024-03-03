@@ -33,8 +33,7 @@ def main():
             with st.chat_message("assistant"):
                 result = chat(vector_store, prompt, st.session_state.chat_history)
                 answer = result["answer"]
-                st.markdown(answer)
-                
+                st.markdown(answer) 
                 st.session_state.chat_history.append((prompt, answer))
             st.session_state.messages.append({"role": "assistant", "content": answer})
 

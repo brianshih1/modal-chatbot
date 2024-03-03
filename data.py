@@ -2,36 +2,41 @@ import re
 import os
 import pickle
 from modal import Volume
+from typing import Callable
 
 EMBEDDING_VOLUME = Volume.persisted("embeddings")
 EMBEDDING_DIR = "/data"
 EMBEDDING_FILE = "embedding.txt"
 
-def python_filter(path: str):
+def modal_client_filter(path: str):
     rule = re.compile(r"^\./code/modal/cli/.*\.py$")
     return bool(rule.match(path))
 
+def modal_examples_filter(path: str):
+    rule = re.compile(r".*\.py$")
+    return bool(rule.match(path))
+
 def load_docs():
+    modal_client_docs = load_docs_from_url("./modal-client", "https://github.com/modal-labs/modal-client.git", modal_client_filter)
+    modal_examples_docs = load_docs_from_url("./modal-examples", "https://github.com/modal-labs/modal-examples.git", modal_examples_filter)
+    return modal_client_docs + modal_examples_docs
+
+def load_docs_from_url(repo_path: str, git_url: str, filter: Callable[[str], bool]):
     from langchain_community.document_loaders import GitLoader
     from langchain.text_splitter import PythonCodeTextSplitter
     
-    print("Loading docs")
-    repo_path = "./code"
     py_loader = None
-    # TODO: Use Volume
     if os.path.exists(repo_path):
-        py_loader = GitLoader(repo_path="./code", file_filter=python_filter)
+        py_loader = GitLoader(repo_path=repo_path, file_filter=filter)
     else: 
         py_loader = GitLoader(
-            repo_path="./code", 
-            clone_url="https://github.com/modal-labs/modal-client.git", 
-            file_filter=python_filter)
+            repo_path=repo_path, 
+            clone_url=git_url, 
+            file_filter=filter)
     py_docs = py_loader.load()
     paths = list(map(lambda x: x.metadata["file_path"], py_docs))
 
     split_py_docs = PythonCodeTextSplitter().split_documents(py_docs)
-
-    split_py_docs[0].metadata["file_name"]
     return split_py_docs
 
 def index_documents(force_reindex: bool):
@@ -80,6 +85,7 @@ def chat(vectorstore, question: str, history: list[tuple[str, str]]):
         llm=chat_model,
         retriever=vectorstore.as_retriever(),
     )
+
     return chain({
         "question": question, 
         "chat_history": history

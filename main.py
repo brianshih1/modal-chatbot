@@ -95,6 +95,7 @@ def spawn_server():
         modal.Secret.from_name("openai-secret"),
         modal.Secret.from_name("pinecone-key")
     ],
+    gpu="any",
     volumes={
         EMBEDDING_DIR: EMBEDDING_VOLUME,
     },
@@ -118,8 +119,9 @@ def run():
     proxy_context = ProxyContext(config)
     return make_simple_proxy_app(proxy_context)
 
-# modal run serve-chatbot.py::index
+# modal run main.py::index
 @test_stub.function(
+    gpu="any",
     # Allows 100 concurrent requests per container.
     allow_concurrent_inputs=100,
     mounts=[streamlit_script_mount],
@@ -132,5 +134,4 @@ def run():
     },
 )
 def index():
-    vector_store = index_documents(False)
-    chat(vector_store)
+    vector_store = index_documents(True)
