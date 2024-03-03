@@ -15,7 +15,7 @@ def load_docs():
     from langchain_community.document_loaders import GitLoader
     from langchain.text_splitter import PythonCodeTextSplitter
     
-    print("LOADING DOCS")
+    print("Loading docs")
     repo_path = "./code"
     py_loader = None
     # TODO: Use Volume
@@ -28,14 +28,9 @@ def load_docs():
             file_filter=python_filter)
     py_docs = py_loader.load()
     paths = list(map(lambda x: x.metadata["file_path"], py_docs))
-    print(f"Paths: {paths}")
 
     split_py_docs = PythonCodeTextSplitter().split_documents(py_docs)
-    
-    print(f"Docs Count: {len(py_docs)}")
 
-    print(f"Split Docs Count: {len(split_py_docs)}")
-    print("Hello")
     split_py_docs[0].metadata["file_name"]
     return split_py_docs
 
@@ -77,8 +72,6 @@ def chat(vectorstore, question: str, history: list[tuple[str, str]]):
     from langchain.chains import ConversationalRetrievalChain
     from langchain_community.embeddings import HuggingFaceEmbeddings
    
-
-    print("Start chat")
     chat_model = ChatOpenAI(
         model_name="gpt-3.5-turbo", 
         api_key=os.environ["OPENAI_API_KEY"]

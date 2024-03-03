@@ -6,7 +6,9 @@ def main():
     st.title("Modal Chatbot")
 
     if st.button('Reindex Code'):
-        print("CLICKED")
+        st.text("Reindexing")
+        st.session_state.vector_store = index_documents(True)
+        st.rerun()
         
     if "vector_store" not in st.session_state:
         st.text("Loading Chatbot...")
