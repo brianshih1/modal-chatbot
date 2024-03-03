@@ -1,39 +1,37 @@
 import modal
+from modal import Volume
 import time
 import os
 import re
 import pathlib
 
-from app import load_docs, index_documents, chat
+from data import load_docs, index_documents, chat, EMBEDDING_DIR, EMBEDDING_FILE, EMBEDDING_VOLUME
 
-stub = modal.Stub("git-repo", 
-    image=modal.Image.debian_slim()
-        .apt_install("git")
-        .env({"GIT_PYTHON_REFRESH": "quiet"})
-        .pip_install(
-            "streamlit",
-            "langchain",
-            "langchain_openai",
-            "GitPython",
-            "faiss-cpu~=1.7.3",
-            "sentence_transformers",
-            "pinecone-client"
-        )
-        .pip_install("git+https://github.com/modal-labs/asgiproxy.git")
+
+base_image = (
+    modal.Image.debian_slim()
+    .apt_install("git")
+    .env({"GIT_PYTHON_REFRESH": "quiet"})
+    .pip_install(
+        "streamlit",
+        "langchain",
+        "langchain_openai",
+        "GitPython",
+        "faiss-cpu~=1.7.3",
+        "sentence_transformers"
+    )
 )
 
-test_stub = modal.Stub("git-repo", 
-    image=modal.Image.debian_slim()
-        .apt_install("git")
-        .env({"GIT_PYTHON_REFRESH": "quiet"})
+stub = modal.Stub("git-repo", 
+    image=base_image
         .pip_install(
-            "langchain",
-            "langchain_openai",
-            "GitPython",
-            "faiss-cpu~=1.7.3",
-            "sentence_transformers",
-            "pinecone-client"
+            "streamlit",
+            "git+https://github.com/modal-labs/asgiproxy.git"
         )
+)
+
+test_stub = modal.Stub("index-code", 
+    image=base_image
 )
 
 streamlit_script_local_path = pathlib.Path(__file__).parent / "app.py"
@@ -96,7 +94,10 @@ def spawn_server():
     secrets=[
         modal.Secret.from_name("openai-secret"),
         modal.Secret.from_name("pinecone-key")
-    ]
+    ],
+    volumes={
+        EMBEDDING_DIR: EMBEDDING_VOLUME,
+    },
 )
 @modal.asgi_app()
 def run():
@@ -117,7 +118,7 @@ def run():
     proxy_context = ProxyContext(config)
     return make_simple_proxy_app(proxy_context)
 
-
+# modal run serve-chatbot.py::index
 @test_stub.function(
     # Allows 100 concurrent requests per container.
     allow_concurrent_inputs=100,
@@ -125,9 +126,11 @@ def run():
     secrets=[
         modal.Secret.from_name("openai-secret"),
         modal.Secret.from_name("pinecone-key")
-    ]
+    ],
+    volumes={
+        EMBEDDING_DIR: EMBEDDING_VOLUME,
+    },
 )
 def index():
-    docs = load_docs()
-    vector_store = index_documents(docs)
+    vector_store = index_documents()
     chat(vector_store)
