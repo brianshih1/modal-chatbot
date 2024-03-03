@@ -8,8 +8,7 @@ def main():
     if st.button('Reindex Code'):
         print("CLICKED")
         
-    docs = load_docs()
-    vector_store = index_documents(docs)
+    vector_store = index_documents(false)
     answer = chat(vector_store)
 
     st.text(answer)

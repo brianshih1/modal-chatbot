@@ -39,7 +39,7 @@ def load_docs():
     split_py_docs[0].metadata["file_name"]
     return split_py_docs
 
-def index_documents():
+def index_documents(force_reindex: bool):
     from langchain.vectorstores.faiss import FAISS
     from langchain_community.embeddings import HuggingFaceEmbeddings
     from langchain.vectorstores.faiss import FAISS
@@ -49,17 +49,16 @@ def index_documents():
     embeddings = HuggingFaceEmbeddings()
     
     doc_embeddings = None
-    if os.path.isfile(doc_embedding_path):
-        print("Embeddings file found")
+    if os.path.isfile(doc_embedding_path) and not force_reindex:
+        print("Not indexing code. Embeddings file found.")
         with open(doc_embedding_path, 'rb') as f:
             doc_embeddings = pickle.load(f)
     else:
         docs = load_docs()
-        print("Embeddings file not found")
+        print("Indexing code")
         contents = list(map(lambda x: x.page_content, docs))
-        filenames = list(map(lambda x: x.metadata["file_name"], docs))
         page_content_embeddings = embeddings.embed_documents(contents)
-        doc_embeddings = list(zip(filenames, page_content_embeddings))
+        doc_embeddings = list(zip(contents, page_content_embeddings))
         with open(doc_embedding_path, 'wb') as f:
             pickle.dump(doc_embeddings, f)
         EMBEDDING_VOLUME.commit()
