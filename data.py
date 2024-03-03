@@ -54,6 +54,8 @@ def index_documents(force_reindex: bool):
         with open(doc_embedding_path, 'rb') as f:
             doc_embeddings = pickle.load(f)
     else:
+        if os.path.exists(doc_embedding_path):
+            os.remove(doc_embedding_path)
         docs = load_docs()
         print("Indexing code")
         contents = list(map(lambda x: x.page_content, docs))
@@ -62,27 +64,32 @@ def index_documents(force_reindex: bool):
         with open(doc_embedding_path, 'wb') as f:
             pickle.dump(doc_embeddings, f)
         EMBEDDING_VOLUME.commit()
-    print(f"Embeddings: {doc_embeddings[0]}")
     
     vectorstore = FAISS.from_embeddings(
         text_embeddings=doc_embeddings,
         embedding=embeddings
         )
+    
     return vectorstore
 
-def chat(vectorstore):
+def chat(vectorstore, question: str, history: list[tuple[str, str]]):
     from langchain_openai import ChatOpenAI
     from langchain.chains import ConversationalRetrievalChain
     from langchain_community.embeddings import HuggingFaceEmbeddings
    
 
     print("Start chat")
-    chat_model = ChatOpenAI(model_name="gpt-3.5-turbo", api_key=os.environ["OPENAI_API_KEY"])
+    chat_model = ChatOpenAI(
+        model_name="gpt-3.5-turbo", 
+        api_key=os.environ["OPENAI_API_KEY"]
+    )
     chain = ConversationalRetrievalChain.from_llm(
         llm=chat_model,
         retriever=vectorstore.as_retriever(),
     )
-    result = chain({"question": "What is Modal stub?", "chat_history": []})
-    print(f"Result: {result}")
-    return result["answer"]
+    return chain({
+        "question": question, 
+        "chat_history": history
+        })
+
 

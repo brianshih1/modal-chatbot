@@ -132,5 +132,5 @@ def run():
     },
 )
 def index():
-    vector_store = index_documents(True)
+    vector_store = index_documents(False)
     chat(vector_store)
